@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>DS Search</title>
+	<style>
+		:root {
+			--bg: #f6f7fb;
+			--card: #ffffff;
+			--text: #1f2330;
+			--muted: #5f6577;
+			--accent: #2f6fed;
+			--accent-hover: #1f56c4;
+			--border: #d9dce5;
+			--link-visited: #6a3fc1;
+		}
+		* { box-sizing: border-box; }
+		body {
+			margin: 0;
+			font-family: "Segoe UI", "PingFang TC", "Noto Sans TC", sans-serif;
+			background: var(--bg);
+			color: var(--text);
+		}
+		main {
+			max-width: 760px;
+			margin: 0 auto;
+			padding: 0 16px 48px;
+		}
+		header {
+			text-align: center;
+			padding: 18vh 0 24px;
+			transition: padding .25s ease;
+		}
+		body.has-results header { padding: 32px 0 16px; }
+		h1 {
+			margin: 0 0 20px;
+			font-size: 44px;
+			letter-spacing: -1px;
+		}
+		h1 span { color: var(--accent); }
+		body.has-results h1 { font-size: 30px; margin-bottom: 14px; }
+		form {
+			display: flex;
+			gap: 8px;
+		}
+		input[type="search"] {
+			flex: 1;
+			min-width: 0;
+			padding: 12px 18px;
+			font-size: 16px;
+			border: 1px solid var(--border);
+			border-radius: 999px;
+			background: var(--card);
+			color: var(--text);
+			outline: none;
+		}
+		input[type="search"]:focus {
+			border-color: var(--accent);
+			box-shadow: 0 0 0 3px rgba(47, 111, 237, .15);
+		}
+		button {
+			padding: 12px 22px;
+			font-size: 16px;
+			border: none;
+			border-radius: 999px;
+			background: var(--accent);
+			color: #fff;
+			cursor: pointer;
+		}
+		button:hover { background: var(--accent-hover); }
+		button:disabled { opacity: .6; cursor: wait; }
+		#status {
+			color: var(--muted);
+			font-size: 14px;
+			margin: 8px 4px 16px;
+			min-height: 1em;
+		}
+		#status.error { color: #c0392b; }
+		ol {
+			list-style: none;
+			margin: 0;
+			padding: 0;
+		}
+		li {
+			background: var(--card);
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			padding: 14px 18px;
+			margin-bottom: 12px;
+		}
+		.url {
+			color: var(--muted);
+			font-size: 13px;
+			overflow-wrap: anywhere;
+		}
+		.title {
+			display: block;
+			font-size: 18px;
+			color: var(--accent);
+			text-decoration: none;
+			margin: 2px 0 6px;
+			overflow-wrap: anywhere;
+		}
+		.title:hover { text-decoration: underline; }
+		.title:visited { color: var(--link-visited); }
+		.snippet {
+			margin: 0;
+			color: var(--muted);
+			font-size: 14px;
+			line-height: 1.55;
+			display: -webkit-box;
+			-webkit-line-clamp: 3;
+			-webkit-box-orient: vertical;
+			overflow: hidden;
+		}
+		.empty {
+			text-align: center;
+			color: var(--muted);
+			padding: 40px 0;
+		}
+	</style>
+</head>
+<body>
+<main>
+	<header>
+		<h1>DS <span>Search</span></h1>
+		<form id="searchForm">
+			<input type="search" id="q" name="q" placeholder="輸入關鍵字搜尋…" autocomplete="off" required>
+			<button type="submit" id="searchBtn">搜尋</button>
+		</form>
+	</header>
+
+	<p id="status" role="status"></p>
+	<ol id="results"></ol>
+</main>
+
+<script>
+	const form = document.getElementById('searchForm');
+	const input = document.getElementById('q');
+	const button = document.getElementById('searchBtn');
+	const statusEl = document.getElementById('status');
+	const resultsEl = document.getElementById('results');
+
+	form.addEventListener('submit', (e) => {
+		e.preventDefault();
+		const query = input.value.trim();
+		if (!query) return;
+		history.replaceState(null, '', '?q=' + encodeURIComponent(query));
+		runSearch(query);
+	});
+
+	// Support links like /?q=NCCU
+	const initial = new URLSearchParams(location.search).get('q');
+	if (initial) {
+		input.value = initial;
+		runSearch(initial);
+	}
+
+	async function runSearch(query) {
+		setStatus('搜尋中…');
+		button.disabled = true;
+		resultsEl.replaceChildren();
+		document.body.classList.add('has-results');
+
+		try {
+			const resp = await fetch('/api/search?q=' + encodeURIComponent(query));
+			const data = await resp.json().catch(() => null);
+			if (!resp.ok) {
+				setStatus((data && data.message) || '搜尋時發生問題，請稍後再試。', true);
+				return;
+			}
+			render(query, Array.isArray(data) ? data : []);
+		} catch (err) {
+			console.error(err);
+			setStatus('無法連線到伺服器，請稍後再試。', true);
+		} finally {
+			button.disabled = false;
+		}
+	}
+
+	function render(query, results) {
+		if (results.length === 0) {
+			setStatus('');
+			const empty = document.createElement('li');
+			empty.className = 'empty';
+			empty.style.border = 'none';
+			empty.style.background = 'transparent';
+			empty.textContent = `沒有找到與「${query}」相關的結果。`;
+			resultsEl.appendChild(empty);
+			return;
+		}
+
+		setStatus(`找到 ${results.length} 筆結果`);
+		for (const r of results) {
+			const href = safeHref(r.url);
+			if (!href) continue;
+
+			const li = document.createElement('li');
+
+			const url = document.createElement('div');
+			url.className = 'url';
+			url.textContent = readableUrl(href);
+
+			const a = document.createElement('a');
+			a.className = 'title';
+			a.href = href;
+			a.target = '_blank';
+			a.rel = 'noopener noreferrer';
+			a.textContent = r.title;
+
+			li.append(url, a);
+
+			if (r.snippet) {
+				const p = document.createElement('p');
+				p.className = 'snippet';
+				p.textContent = r.snippet;
+				li.appendChild(p);
+			}
+			resultsEl.appendChild(li);
+		}
+	}
+
+	// Only allow http(s) links; drops javascript: and other schemes.
+	function safeHref(raw) {
+		try {
+			const u = new URL(raw);
+			return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : null;
+		} catch {
+			return null;
+		}
+	}
+
+	// Display-only: turn %E6%94%BF... back into readable characters.
+	function readableUrl(href) {
+		try {
+			return decodeURI(href);
+		} catch {
+			return href;
+		}
+	}
+
+	function setStatus(text, isError = false) {
+		statusEl.textContent = text;
+		statusEl.classList.toggle('error', isError);
+	}
+</script>
+</body>
+</html>

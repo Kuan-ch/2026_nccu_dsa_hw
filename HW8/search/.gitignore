@@ -1,0 +1,11 @@
+# Local secrets (Tavily API key) — never commit
+application-local.properties
+
+# Build output
+target/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
